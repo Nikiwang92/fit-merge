@@ -29,7 +29,7 @@
     <section class="workspace">
       <div class="panel"><div class="panel-head"><span>Upload queue</span><span id="count">00 FILES</span></div><div class="panel-body">
         <div id="error" class="notice" role="alert"></div>
-        <form id="merge-form" method="post" action="/merge" enctype="multipart/form-data">
+        <form id="merge-form" method="post" action="/api/index" enctype="multipart/form-data">
           <div id="dropzone" class="dropzone" role="button" tabindex="0" aria-controls="file-input" aria-label="选择 FIT 文件"><div><svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 16v3h16v-3"/></svg><p class="drop-title">拖放 FIT 文件到这里</p><p class="drop-hint">或点击选择 · 2–10 个文件 · 单个文件最大 100 MB</p></div><input id="file-input" class="file-input" type="file" name="files" accept=".fit" multiple required></div>
           <ul id="queue" class="queue" aria-live="polite"></ul>
           <div class="token"><label for="token">访问口令（服务器未启用时留空）</label><input id="token" name="token" type="password" autocomplete="off"></div>

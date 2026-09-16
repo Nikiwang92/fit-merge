@@ -28,11 +28,13 @@ def index():
 
 
 @app.get("/health")
+@app.get("/api/index")
 def health():
     return {"status": "ok"}
 
 
 @app.post("/merge")
+@app.post("/api/index")
 def merge_upload():
     expected_token = os.getenv("ACCESS_TOKEN")
     if expected_token and request.form.get("token") != expected_token:
