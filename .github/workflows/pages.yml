@@ -1,0 +1,40 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build static site
+        run: |
+          mkdir -p site/fit_merge_tool site/vendor
+          cp index.html site/index.html
+          cp fit_merge_tool/merge_fit_coros_to_garmin.py site/fit_merge_tool/
+          cp fit_merge_tool/merge_fit_garmin_to_coros.py site/fit_merge_tool/
+          cp vendor/fitdecode-0.11.0-py3-none-any.whl site/vendor/
+          touch site/.nojekyll
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
