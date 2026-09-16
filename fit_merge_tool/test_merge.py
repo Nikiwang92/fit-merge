@@ -6,7 +6,6 @@ from __future__ import annotations
 import tempfile
 import unittest
 import warnings
-from datetime import timedelta
 from pathlib import Path
 
 warnings.filterwarnings("ignore", message="invalid field size 1.*")
@@ -55,11 +54,11 @@ class FitMergeTests(unittest.TestCase):
                 "speed", "cadence", "power", "step_length",
             )
             for source, result in zip(first, merged[:len(first)]):
-                self.assertEqual(result["timestamp"] - source["timestamp"], timedelta(days=365))
+                self.assertEqual(result["timestamp"], source["timestamp"])
                 for name in fields:
                     self.assertEqual(result.get(name), source.get(name))
             for source, result in zip(second, merged[len(first):]):
-                self.assertEqual(result["timestamp"] - source["timestamp"], timedelta(days=365))
+                self.assertEqual(result["timestamp"], source["timestamp"])
                 for name in fields:
                     self.assertEqual(result.get(name), source.get(name))
 

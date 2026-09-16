@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", message="invalid field size 1.*")
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data" / "fit"
 OUTPUT_PATH = ROOT / "merged" / "merged.fit"
-SHIFT_SECONDS = 365 * 24 * 60 * 60
+SHIFT_SECONDS = 0
 
 CRC_TABLE = (
     0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
@@ -118,7 +118,7 @@ def field_definitions(frame: Any) -> tuple[Any, ...]:
 
 def encode_raw(base_type: str, value: int | float, endian: str) -> bytes:
     formats = {
-        "uint8": "B", "uint16": "H", "uint32": "I",
+        "enum": "B", "uint8": "B", "uint16": "H", "uint32": "I",
         "sint8": "b", "sint16": "h", "sint32": "i",
     }
     byteorder = "little" if endian == "<" else "big"
@@ -281,6 +281,26 @@ def combine_session(first: Frame, second: Frame) -> dict[str, int | float]:
     }
 
 
+
+def add_standard_fields(frame: Frame, additions: tuple[tuple[int, int, int, bytes], ...], raw_override: bytes | None = None) -> bytes:
+    raw = bytearray(raw_override or frame.raw)
+    definitions = field_definitions(frame.frame)
+    standard = [item for item in definitions if not item.is_dev]
+    if frame.is_definition:
+        count = raw[5]
+        if count != len(standard):
+            raise ValueError("Unexpected FIT definition field count")
+        offset = 6 + count * 3
+        raw[5] = count + len(additions)
+        raw[offset:offset] = b"".join(
+            bytes((number, size, base_type))
+            for number, size, base_type, _ in additions
+        )
+    else:
+        offset = 1 + sum(item.size for item in standard)
+        raw[offset:offset] = b"".join(value for _, _, _, value in additions)
+    return bytes(raw)
+
 def merge_source_data(first: FitDocument, second: FitDocument) -> tuple[bytes, dict[str, float]]:
     first_frames = list(first.frames)
     second_frames = deduplicate_descriptions(first_frames, second.frames)
@@ -313,6 +333,7 @@ def merge_source_data(first: FitDocument, second: FitDocument) -> tuple[bytes, d
         if frame.is_definition and frame.name == "session"
     )
     total_timer = float(value(session1, "total_timer_time")) + float(value(session2, "total_timer_time"))
+    session_values = combine_session(session1, session2)
 
     distance_field = frame_map(session1)["total_distance"].field
     distance_scale = getattr(distance_field, "scale", None) or 1
@@ -350,7 +371,7 @@ def merge_source_data(first: FitDocument, second: FitDocument) -> tuple[bytes, d
         chunks.append(raw)
 
     chunks.append(session_def.raw)
-    chunks.append(patch_data(session1, combine_session(session1, session2), physical=True))
+    chunks.append(patch_data(session1, session_values, physical=True))
 
     metadata = {
         "records": float(len(data_frames(first_frames, "record")) + len(data_frames(second_frames, "record"))),
@@ -359,6 +380,57 @@ def merge_source_data(first: FitDocument, second: FitDocument) -> tuple[bytes, d
     }
     return b"".join(chunks), metadata
 
+
+
+def standardize_for_garmin(document: FitDocument) -> bytes:
+    frames = list(document.frames)
+    activity_def = next(
+        frame for frame in frames
+        if frame.is_definition and frame.name == "activity"
+    )
+    activity_data = data_frames(frames, "activity")[0]
+    session_def = next(
+        frame for frame in frames
+        if frame.is_definition and frame.name == "session"
+    )
+    session_data = data_frames(frames, "session")[0]
+    lap_total = len(data_frames(frames, "lap"))
+    session_end = value(session_data, "timestamp")
+    local_offset = value(activity_data, "local_timestamp") - value(activity_data, "timestamp")
+    additions = (
+        (254, 2, 0x84, struct.pack("<H", 0)),
+        (25, 2, 0x84, struct.pack("<H", 0)),
+        (26, 2, 0x84, struct.pack("<H", lap_total)),
+    )
+
+    chunks: list[bytes] = []
+    for frame in frames:
+        if frame is activity_def or frame is activity_data:
+            continue
+        raw = frame.raw
+        if frame.is_data and frame.name == "file_id":
+            raw = patch_data(frame, {"manufacturer": 1, "product": 4315}, physical=False)
+        elif frame.is_data and frame.name == "device_info":
+            raw = patch_data(frame, {"manufacturer": 1}, physical=False)
+        elif frame is session_def:
+            raw = add_standard_fields(frame, additions)
+        elif frame is session_data:
+            raw = add_standard_fields(frame, additions, raw_override=raw)
+        chunks.append(raw)
+
+    activity_raw = patch_data(
+        activity_data,
+        {
+            "timestamp": session_end,
+            "local_timestamp": session_end + local_offset,
+            "total_timer_time": value(session_data, "total_timer_time"),
+        },
+        physical=True,
+    )
+    activity_frame = replace(activity_data, raw=activity_raw)
+    chunks.append(activity_def.raw)
+    chunks.append(patch_data(activity_frame, {"type": 0}, physical=False))
+    return build_fit(document.header, chunks)
 
 def shift_year(document: FitDocument) -> bytes:
     names = {"timestamp", "start_time", "local_timestamp", "time_created"}
@@ -390,7 +462,7 @@ def merge_files(
         current = parse_fit(build_fit(current.header, [merged_data]))
 
     output_path.parent.mkdir(exist_ok=True)
-    output_path.write_bytes(shift_year(current))
+    output_path.write_bytes(standardize_for_garmin(current))
     check = load_fit(output_path)
     counts = {
         name: len(data_frames(check.frames, name))
